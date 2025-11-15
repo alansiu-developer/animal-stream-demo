@@ -1,0 +1,5 @@
+com\example\task2\controller\AnimalController.class
+com\example\task2\DemoApplication.class
+com\example\task2\config\WebSocketConfig.class
+com\example\task2\websocket\AnimalWebSocketHandler.class
+com\example\task2\service\AnimalService.class

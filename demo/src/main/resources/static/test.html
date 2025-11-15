@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Animal Stream Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 2rem;
+            background: #f4f4f4;
+        }
+
+        #log {
+            margin: 2rem auto;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            max-width: 400px;
+            min-height: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            text-align: left;
+        }
+
+        .animal {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #2196F3;
+            margin: 1rem 0;
+        }
+
+        button {
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            margin: 0.5rem;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .start { background: #4CAF50; color: white; }
+        .stop  { background: #f44336; color: white; }
+
+        #status {
+            font-weight: bold;
+            color: #666;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Random Animal Live Stream</h1>
+    <div id="log">
+        <p>Waiting for connection...</p>
+    </div>
+    <button class="start" onclick="startStream()">Start</button>
+    <button class="stop"  onclick="stopStream()">Stop</button>
+    <p id="status">Status: Loading...</p>
+
+    <!-- Local JS files -->
+    <script defer src="/js/sockjs.min.js"></script>
+    <script defer src="/js/stomp.umd.min.js"></script>
+
+    <script defer>
+        let client = null;
+        const log = document.getElementById('log');
+        const statusEl = document.getElementById('status');
+
+        function logMessage(msg, isAnimal = false) {
+            const p = document.createElement('p');
+            p.textContent = msg;
+            if (isAnimal) p.className = 'animal';
+            log.appendChild(p);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        // Safely update status
+        function updateStatus() {
+            fetch('http://localhost:8080/api/status')
+                .then(r => {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.text();
+                })
+                .then(s => {
+                    statusEl.textContent = 'Status: ' + (s === 'running' ? 'Running' : 'Stopped');
+                })
+                .catch(() => {
+                    statusEl.textContent = 'Status: Backend not responding';
+                });
+        }
+
+        window.addEventListener('load', () => {
+            const stompPresent = (typeof window.Stomp !== 'undefined') ||
+                                 (typeof window.StompJs !== 'undefined') ||
+                                 (typeof window.StompJs?.Stomp !== 'undefined');
+            if (!stompPresent) {
+                logMessage('Error: Stomp or StompJs not loaded! Check /js/stomp.umd.min.js', false);
+            } else {
+                logMessage('JS loaded – click “Start” to begin', false);
+            }
+            updateStatus();
+            setInterval(updateStatus, 5000);
+        });
+
+        function connectWebSocket() {
+            const hasLib = (typeof window.Stomp !== 'undefined') || (typeof window.StompJs !== 'undefined');
+            if (!hasLib || typeof SockJS === 'undefined') {
+                logMessage('Error: Stomp or StompJs not loaded', false);
+                return;
+            }
+
+            logMessage('Establishing SockJS connection...');
+            const socket = new SockJS('http://localhost:8080/ws');
+
+            socket.onopen  = () => logMessage('SockJS connection opened');
+            socket.onclose = () => logMessage('SockJS connection closed');
+            socket.onerror = (e) => logMessage('SockJS error: ' + e);
+
+            // Prefer newer StompJs; fall back to legacy Stomp
+            const Stomp = window.StompJs?.Stomp || window.Stomp;
+            client = Stomp.over(socket);
+            client.debug = (msg) => console.log('STOMP:', msg);
+
+            client.connect(
+                {},
+                () => {
+                    logMessage('STOMP connected – subscribing to /topic/animal');
+                    client.subscribe('/topic/animal', message => {
+                        logMessage('Received animal: ' + message.body, true);
+                    });
+                },
+                error => {
+                    logMessage('STOMP connection failed: ' + JSON.stringify(error));
+                    console.error('STOMP Error:', error);
+                }
+            );
+        }
+
+        function startStream() {
+            logMessage('Starting stream system...');
+
+            if (client) {
+                client.deactivate();
+                client = null;
+            }
+
+            connectWebSocket();
+
+            fetch('http://localhost:8080/api/start', { method: 'POST' })
+                .then(r => r.text())
+                .then(text => logMessage(text))
+                .catch(() => logMessage('Start request failed'));
+
+            updateStatus();
+        }
+
+        function stopStream() {
+            fetch('http://localhost:8080/api/stop', { method: 'POST' })
+                .then(() => logMessage('Stop command sent'))
+                .catch(() => logMessage('Stop request failed'));
+
+            if (client) {
+                client.deactivate();
+                client = null;
+                logMessage('WebSocket disconnected');
+            }
+            updateStatus();
+        }
+    </script>
+</body>
+
+</html>
